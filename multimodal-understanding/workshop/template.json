@@ -1,0 +1,160 @@
+{
+  "Resources": {
+    "BookingsTable7A7CF597": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "booking_id",
+            "AttributeType": "S"
+          }
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "KeySchema": [
+          {
+            "AttributeName": "booking_id",
+            "KeyType": "HASH"
+          }
+        ],
+        "TableName": "hotel_bookings"
+      },
+      "UpdateReplacePolicy": "Delete",
+      "DeletionPolicy": "Delete",
+      "Metadata": {
+        "aws:cdk:path": "BookingsStack/BookingsTable/Table/Resource"
+      }
+    },
+    "BookingsFunctionRole588601C9": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Statement": [
+            {
+              "Action": "sts:AssumeRole",
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              }
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+              ]
+            ]
+          }
+        ]
+      },
+      "Metadata": {
+        "aws:cdk:path": "BookingsStack/BookingsFunction/Role/Resource"
+      }
+    },
+    "BookingsFunctionRoleDefaultPolicyFEFF5620": {
+      "Type": "AWS::IAM::Policy",
+      "Properties": {
+        "PolicyDocument": {
+          "Statement": [
+            {
+              "Action": [
+                "dynamodb:DeleteItem",
+                "dynamodb:GetItem",
+                "dynamodb:PutItem"
+              ],
+              "Effect": "Allow",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "BookingsTable7A7CF597",
+                  "Arn"
+                ]
+              }
+            },
+            {
+              "Action": [
+                "dynamodb:BatchGetItem",
+                "dynamodb:BatchWriteItem",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:DeleteItem",
+                "dynamodb:DescribeTable",
+                "dynamodb:GetItem",
+                "dynamodb:GetRecords",
+                "dynamodb:GetShardIterator",
+                "dynamodb:PutItem",
+                "dynamodb:Query",
+                "dynamodb:Scan",
+                "dynamodb:UpdateItem"
+              ],
+              "Effect": "Allow",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "BookingsTable7A7CF597",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Ref": "AWS::NoValue"
+                }
+              ]
+            }
+          ],
+          "Version": "2012-10-17"
+        },
+        "PolicyName": "BookingsFunctionRoleDefaultPolicyFEFF5620",
+        "Roles": [
+          {
+            "Ref": "BookingsFunctionRole588601C9"
+          }
+        ]
+      },
+      "Metadata": {
+        "aws:cdk:path": "BookingsStack/BookingsFunction/Role/DefaultPolicy/Resource"
+      }
+    },
+    "BookingsFunction99217974": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "ZipFile": "import json\nimport uuid\nimport boto3\nimport os\n\ndynamodb = boto3.resource('dynamodb')\n\n\ntable_name = os.environ['TABLE_NAME']\ntable = dynamodb.Table(table_name)  # Dynamically inject the value of tab\n\ndef get_named_parameter(event, name):\n    \"\"\"\n    Get a parameter from the lambda event\n    \"\"\"\n    return next(item for item in event['parameters'] if item['name'] == name)['value']\n\n\ndef get_booking_details(booking_id):\n    \"\"\"\n    Retrieve details of a hotel booking\n    \n    Args:\n        booking_id (string): The ID of the booking to retrieve\n    \"\"\"\n    try:\n        response = table.get_item(Key={'booking_id': booking_id})\n        if 'Item' in response:\n            return response['Item']\n        else:\n            return {'message': f'No booking found with ID {booking_id}'}\n    except Exception as e:\n        return {'error': str(e)}\n\n\n\n\ndef create_booking(date, name, hour, num_guests):\n    \"\"\"\n    Create a new hotel booking\n    \n    Args:\n        date (string): The date of the booking\n        name (string): Name to identify your reservation\n        hour (string): The hour of the booking\n        num_guests (integer): The number of guests for the booking\n    \"\"\"\n    try:\n        booking_id = str(uuid.uuid4())[:8]\n        table.put_item(\n            Item={\n                'booking_id': booking_id,\n                'date': date,\n                'name': name,\n                'hour': hour,\n                'num_guests': num_guests\n            }\n        )\n        return {'booking_id': booking_id}\n    except Exception as e:\n        return {'error': str(e)}\n\n\n\n\ndef delete_booking(booking_id):\n    \"\"\"\n    Delete an existing hotel booking\n    \n    Args:\n        booking_id (str): The ID of the booking to delete\n    \"\"\"\n    try:\n        response = table.delete_item(Key={'booking_id': booking_id})\n        if response['ResponseMetadata']['HTTPStatusCode'] == 200:\n            return {'message': f'Booking with ID {booking_id} deleted successfully'}\n        else:\n            return {'message': f'Failed to delete booking with ID {booking_id}'}\n    except Exception as e:\n        return {'error': str(e)}\n\n\n\n\ndef lambda_handler(event, context):\n    # Get the action group used during the invocation of the lambda function\n    actionGroup = event.get('actionGroup', '')\n    \n    # Name of the function that should be invoked\n    function = event.get('function', '')\n    \n    # Parameters to invoke function with\n    parameters = event.get('parameters', [])\n\n\n\n\n    if function == 'get_booking_details':\n        booking_id = get_named_parameter(event, \"booking_id\")\n        if booking_id:\n            response = str(get_booking_details(booking_id))\n            responseBody = {'TEXT': {'body': json.dumps(response)}}\n        else:\n            responseBody = {'TEXT': {'body': 'Missing booking_id parameter'}}\n\n\n\n\n    elif function == 'create_booking':\n        date = get_named_parameter(event, \"date\")\n        name = get_named_parameter(event, \"name\")\n        hour = get_named_parameter(event, \"hour\")\n        num_guests = get_named_parameter(event, \"num_guests\")\n\n\n\n\n        if date and hour and num_guests:\n            response = str(create_booking(date, name, hour, num_guests))\n            responseBody = {'TEXT': {'body': json.dumps(response)}}\n        else:\n            responseBody = {'TEXT': {'body': 'Missing required parameters'}}\n\n\n\n\n    elif function == 'delete_booking':\n        booking_id = get_named_parameter(event, \"booking_id\")\n        if booking_id:\n            response = str(delete_booking(booking_id))\n            responseBody = {'TEXT': {'body': json.dumps(response)}}\n        else:\n            responseBody = {'TEXT': {'body': 'Missing booking_id parameter'}}\n\n\n\n\n    else:\n        responseBody = {'TEXT': {'body': 'Invalid function'}}\n\n\n\n\n    action_response = {\n        'actionGroup': actionGroup,\n        'function': function,\n        'functionResponse': {\n            'responseBody': responseBody\n        }\n    }\n\n\n\n\n    function_response = {'response': action_response, 'messageVersion': event['messageVersion']}\n    print(\"Response: {}\".format(function_response))\n\n\n\n\n    return function_response\n"
+        },
+        "Environment": {
+          "Variables": {
+            "TABLE_NAME": "hotel_bookings"
+          }
+        },
+        "FunctionName": "hotel-booking-agent-lambda",
+        "Handler": "lambda_function.lambda_handler",
+        "Role": {
+          "Fn::GetAtt": [
+            "BookingsFunctionRole588601C9",
+            "Arn"
+          ]
+        },
+        "Runtime": "python3.12",
+        "Timeout": 60
+      },
+      "DependsOn": [
+        "BookingsFunctionRoleDefaultPolicyFEFF5620",
+        "BookingsFunctionRole588601C9"
+      ],
+      "Metadata": {
+        "aws:cdk:path": "BookingsStack/BookingsFunction/Function/Resource"
+      }
+    }
+  },
+  "Parameters": {
+    "BootstrapVersion": {
+      "Type": "AWS::SSM::Parameter::Value<String>",
+      "Default": "/cdk-bootstrap/hnb659fds/version",
+      "Description": "Version of the CDK Bootstrap resources in this environment, automatically retrieved from SSM Parameter Store. [cdk:skip]"
+    }
+  }
+}
